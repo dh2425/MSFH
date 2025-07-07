@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 from model import HashingModel,similarity,similarity_l
 from metric import ContrastiveLoss,simK
 from optimization import BertAdam
-from evluation import calc_map_k,get_code,pr_curve
+from evluation import calc_map_k,get_code
 
 
 class Modal(nn.Module):
@@ -80,27 +80,22 @@ class MGSAL:
 
         self.model = Modal(opt).to(opt.device)
         self.model.float()
-        clip_lr = 0.000002
-        lr = 0.001
-        epochs = 30
-        warmup_proportion = 0.05  # help="Proportion of training to perform learning rate warmup
-        weight_decay = 0.01
+
         self.optimizer = BertAdam(
             [
-                {'params': self.model.clip.parameters(), 'lr': clip_lr},
-                {'params': self.model.hash.parameters(), 'lr': lr},
+                {'params': self.model.clip.parameters(), 'lr': self.opt.clip_lr },
+                {'params': self.model.hash.parameters(), 'lr': self.opt.lr},
             ],
-            lr=lr, warmup=warmup_proportion, schedule='warmup_cosine',
-            b1=0.9, b2=0.98, e=1e-6, t_total=len(self.train_loader) * epochs,
-            weight_decay=weight_decay, max_grad_norm=1.0
+            lr=self.opt.lr, warmup=0.05, schedule='warmup_cosine',
+            b1=0.9, b2=0.98, e=1e-6, t_total=len(self.train_loader) * self.opt.epoch,
+            weight_decay=0.01, max_grad_norm=1.0
         )
 
         self.loss_l2 = torch.nn.MSELoss()
         self.closs= ContrastiveLoss(self.opt.batch_size)
         self.max_map = {'i2t': 0, "t2i": 0}
         self.best_epoch = 0
-        self.P=False
-        self.simK=False
+
     def load_checkpoints(self):
         self.model.load_state_dict(torch.load("path/model.pth", map_location=f"cuda:{self.opt.device}"))
         return self.model
@@ -112,28 +107,24 @@ class MGSAL:
         torch.save(self.model.state_dict(), os.path.join(self.opt.save_dir, f"model_{self.opt.dataset}_{self.opt.k_bits}.pth"))
 
     def train(self,epoch):
-        # for epoch in range(epochs):
+
             iter = 0
             self.model.train()
             print("####################### Train epochs: %d #######################" % epoch)
             for image, text, key_padding_mask, _, index in self.train_loader:
                 image = image.float().to(self.opt.device, non_blocking=True)
-
                 text = text.to(self.opt.device, non_blocking=True)
                 key_padding_mask = key_padding_mask.to(self.opt.device, non_blocking=True)
                 output_dict = self.model(image, text, key_padding_mask)
-
-
-
                 loss=self.modal_loss(output_dict,epoch)
-
-
                 iter += 1
                 if iter%100==0:
                     print(loss)
+
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+
             if (epoch+1)%self.opt.iter==0:
                 self.eval(epoch)
 
@@ -154,9 +145,9 @@ class MGSAL:
         all_region_fus = output_dict['all_region_fus']
 
         all_fu = torch.cat((img_embedding, text_embedding), 1)
-        S_embedding = similarity_l(all_fu, self.opt) * 4
+        S_embedding = similarity_l(all_fu, self.opt) *self.opt.scal
 
-        S = similarity(img_cls, txt_eos, img_region_fus, txt_region_fus, all_region_fus, self.opt) * 4
+        S = similarity(img_cls, txt_eos, img_region_fus, txt_region_fus, all_region_fus, self.opt) * self.opt.scal
 
         loss1 = self.closs(img_embedding, text_embedding)
 
