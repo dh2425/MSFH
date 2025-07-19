@@ -45,7 +45,7 @@ class GCNet_IMG(nn.Module):
         nn.init.kaiming_uniform_(self.weight)
 
     def forward(self, x, adj):
-        #原始图结构的某种“修正”或“增强”。
+
         adj = adj + self.gamma * self.weight  #gamma 0.45  weight(32 32)
         x = torch.relu(self.gc1(x, adj))
         x = torch.relu(self.gc2(x, adj))
